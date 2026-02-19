@@ -30,9 +30,10 @@ variable "aws_services" {
 variable "connector_env" {
   description = "Connector environment variables"
   type        = map(string)
+  default     = {}
 }
 
-variable "service_port" {
+variable "service_port_range" {
   description = "Port range that the connected service may listen on"
   type        = object({ from = number, to = number })
 }
