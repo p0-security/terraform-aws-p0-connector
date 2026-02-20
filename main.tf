@@ -117,7 +117,7 @@ resource "terraform_data" "push_lambda_image" {
 
 # Lambda function (container image)
 resource "aws_lambda_function" "p0_connector" {
-  function_name = local.resource_name
+  function_name = reverse(split(":", var.connector_arn))[0]
   role          = aws_iam_role.lambda_execution.arn
   package_type  = "Image"
   image_uri     = "${aws_ecr_repository.lambda.repository_url}:latest"
@@ -177,4 +177,20 @@ resource "aws_iam_role" "lambda_execution" {
 resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
   role       = aws_iam_role.lambda_execution.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+}
+
+resource "aws_iam_role_policy" "lambda_invocation" {
+  name = "${local.resource_name}-invoke"
+  role = var.aws_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "lambda:InvokeFunction"
+        Resource = aws_lambda_function.p0_connector.arn
+      }
+    ]
+  })
 }

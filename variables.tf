@@ -27,6 +27,11 @@ variable "aws_services" {
   type        = list(string)
 }
 
+variable "connector_arn" {
+  description = "The ARN of the connector as expected by P0"
+  type        = string
+}
+
 variable "connector_env" {
   description = "Connector environment variables"
   type        = map(string)
