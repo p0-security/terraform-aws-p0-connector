@@ -2,7 +2,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.0"
     }
   }
 }
@@ -79,6 +79,8 @@ resource "aws_vpc_endpoint" "aws_services" {
 resource "aws_ecr_repository" "lambda" {
   name                 = local.resource_name
   image_tag_mutability = "MUTABLE"
+
+  force_delete = true
 
   image_scanning_configuration {
     scan_on_push = true
