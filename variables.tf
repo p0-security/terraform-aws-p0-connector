@@ -38,17 +38,6 @@ variable "connector_env" {
   default     = {}
 }
 
-variable "service_port_range" {
-  description = "Port range that the connected service may listen on"
-  type        = object({ from = number, to = number })
-}
-
-variable "service_cidr" {
-  description = "CIDR blocks within the VPC that the connected service may be served on"
-  type        = list(string)
-  default     = ["10.0.0.0/16"]
-}
-
 variable "service_subnet_ids" {
   description = "Subnet IDs of the connected service"
   type        = list(string)
