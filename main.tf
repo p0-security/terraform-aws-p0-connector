@@ -2,7 +2,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.0"
     }
   }
 }
@@ -23,19 +23,11 @@ locals {
   }
 }
 
-# Security group for Lambda communication to connected service
+# Security group for Lambda
 resource "aws_security_group" "lambda" {
   name        = local.resource_name
-  description = "Security group allowing traffic from the P0 connector Lambda to the connected service"
+  description = "Security group for P0 connector Lambda function"
   vpc_id      = var.vpc_id
-
-  egress {
-    description = "Outbound to service"
-    from_port   = var.service_port_range.from
-    to_port     = var.service_port_range.to
-    protocol    = "tcp"
-    cidr_blocks = var.service_cidr
-  }
 
   tags = local.tags
 }
@@ -43,26 +35,31 @@ resource "aws_security_group" "lambda" {
 # Security group for VPC endpoints
 resource "aws_security_group" "vpc_endpoint" {
   name        = "p0-connector-vpc-endpoints-${var.service}-${var.vpc_id}"
-  description = "Security group allowing all inbound traffic for VPC endpoint"
+  description = "Security group for VPC endpoints allowing traffic from Lambda"
   vpc_id      = var.vpc_id
 
-  ingress {
-    description = "HTTPS traffic from VPC"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["10.0.0.0/16"]
-  }
-
-  egress {
-    description = "HTTPS outbound to VPC"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["10.0.0.0/16"]
-  }
-
   tags = local.tags
+}
+
+# Security group rules (separate to avoid cycles)
+resource "aws_security_group_rule" "lambda_to_vpc_endpoint" {
+  type                     = "egress"
+  description              = "HTTPS outbound to VPC endpoints"
+  from_port                = 443
+  to_port                  = 443
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.lambda.id
+  source_security_group_id = aws_security_group.vpc_endpoint.id
+}
+
+resource "aws_security_group_rule" "vpc_endpoint_from_lambda" {
+  type                     = "ingress"
+  description              = "HTTPS traffic from Lambda"
+  from_port                = 443
+  to_port                  = 443
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.vpc_endpoint.id
+  source_security_group_id = aws_security_group.lambda.id
 }
 
 # VPC endpoints for AWS services
@@ -82,6 +79,8 @@ resource "aws_vpc_endpoint" "aws_services" {
 resource "aws_ecr_repository" "lambda" {
   name                 = local.resource_name
   image_tag_mutability = "MUTABLE"
+
+  force_delete = true
 
   image_scanning_configuration {
     scan_on_push = true
