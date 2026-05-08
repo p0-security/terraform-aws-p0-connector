@@ -4,6 +4,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    docker = {
+      source  = "kreuzwerker/docker"
+      version = "~> 3.0"
+    }
   }
 }
 
@@ -15,11 +19,31 @@ locals {
   image_name    = "p0-connector-${var.service}"
   region        = coalesce(var.aws_region, data.aws_region.current.id)
   resource_name = "p0-connector-${var.service}-${var.vpc_id}"
+  effective_tag = var.use_latest_tag ? "latest" : var.image_tag
   tags = {
     ManagedBy  = "Terraform"
     ManagedFor = "P0"
     P0Service  = var.service
     VpcId      = var.vpc_id
+  }
+}
+
+data "docker_registry_image" "upstream" {
+  name = "p0security/${local.image_name}:${local.effective_tag}"
+
+  lifecycle {
+    precondition {
+      condition     = var.use_latest_tag != (var.image_tag != null)
+      error_message = "Exactly one of `use_latest_tag = true` or `image_tag` (non-null) must be set."
+    }
+    precondition {
+      condition     = var.image_digest == null || !var.use_latest_tag
+      error_message = "`image_digest` may only be set alongside `image_tag` (digest pinning requires an explicit tag, not `latest`)."
+    }
+    postcondition {
+      condition     = var.image_digest == null || self.sha256_digest == var.image_digest
+      error_message = "Provided `image_digest` does not match the upstream tag's actual digest. Either update the digest pin or remove it to accept the upstream content."
+    }
   }
 }
 
@@ -97,21 +121,32 @@ resource "terraform_data" "push_lambda_image" {
       aws ecr get-login-password --region ${local.region} | \
         docker login --username AWS --password-stdin ${local.account_id}.dkr.ecr.${local.region}.amazonaws.com
 
-      # Pull P0's public image
-      docker pull p0security/${local.image_name}:latest --platform linux/amd64
+      # Pull P0's public image by digest for determinism
+      docker pull p0security/${local.image_name}@${data.docker_registry_image.upstream.sha256_digest} --platform linux/amd64
 
       # Tag for ECR repository
-      docker tag p0security/${local.image_name}:latest \
-        ${aws_ecr_repository.lambda.repository_url}:latest
+      docker tag p0security/${local.image_name}@${data.docker_registry_image.upstream.sha256_digest} \
+        ${aws_ecr_repository.lambda.repository_url}:${local.effective_tag}
 
       # Push to ECR
-      docker push ${aws_ecr_repository.lambda.repository_url}:latest
+      docker push ${aws_ecr_repository.lambda.repository_url}:${local.effective_tag}
     EOT
   }
 
   triggers_replace = {
     repository_url = aws_ecr_repository.lambda.repository_url
+    digest         = data.docker_registry_image.upstream.sha256_digest
+    tag            = local.effective_tag
   }
+}
+
+# Resolve the digest as stored in ECR after push. ECR may re-encode the manifest,
+# so its digest can differ from the upstream Docker Hub digest. Lambda needs ECR's.
+data "aws_ecr_image" "lambda" {
+  repository_name = aws_ecr_repository.lambda.name
+  image_tag       = local.effective_tag
+
+  depends_on = [terraform_data.push_lambda_image]
 }
 
 # Lambda function (container image)
@@ -119,7 +154,7 @@ resource "aws_lambda_function" "p0_connector" {
   function_name = reverse(split(":", var.connector_arn))[0]
   role          = aws_iam_role.lambda_execution.arn
   package_type  = "Image"
-  image_uri     = "${aws_ecr_repository.lambda.repository_url}:latest"
+  image_uri     = "${aws_ecr_repository.lambda.repository_url}@${data.aws_ecr_image.lambda.image_digest}"
   timeout       = 30
   architectures = ["x86_64"]
   publish       = true
@@ -132,10 +167,6 @@ resource "aws_lambda_function" "p0_connector" {
   environment {
     variables = var.connector_env
   }
-
-  depends_on = [
-    terraform_data.push_lambda_image
-  ]
 
   tags = local.tags
 }
