@@ -182,7 +182,11 @@ resource "aws_lambda_alias" "latest" {
 resource "aws_lambda_provisioned_concurrency_config" "connector" {
   function_name                     = aws_lambda_function.p0_connector.function_name
   provisioned_concurrent_executions = 1
-  qualifier                         = aws_lambda_alias.latest.name
+  qualifier                         = aws_lambda_function.p0_connector.version
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # Lambda Execution Role
