@@ -15,11 +15,13 @@ data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
 locals {
-  account_id    = coalesce(var.aws_account_id, data.aws_caller_identity.current.account_id)
-  image_name    = "p0-connector-${var.service}"
-  region        = coalesce(var.aws_region, data.aws_region.current.id)
-  resource_name = "p0-connector-${var.service}-${var.vpc_id}"
-  effective_tag = var.use_latest_tag ? "latest" : var.image_tag
+  account_id           = coalesce(var.aws_account_id, data.aws_caller_identity.current.account_id)
+  image_name           = "p0-connector-${var.service}"
+  region               = coalesce(var.aws_region, data.aws_region.current.id)
+  resource_name        = "p0-connector-${var.service}-${var.vpc_id}"
+  docker_image_parts   = split("@", var.docker_image_tag)
+  docker_tag_name      = local.docker_image_parts[0]
+  docker_pinned_digest = length(local.docker_image_parts) > 1 ? local.docker_image_parts[1] : null
   tags = {
     ManagedBy  = "Terraform"
     ManagedFor = "P0"
@@ -29,20 +31,12 @@ locals {
 }
 
 data "docker_registry_image" "upstream" {
-  name = "p0security/${local.image_name}:${local.effective_tag}"
+  name = "p0security/${local.image_name}:${local.docker_tag_name}"
 
   lifecycle {
-    precondition {
-      condition     = var.use_latest_tag != (var.image_tag != null)
-      error_message = "Exactly one of `use_latest_tag = true` or `image_tag` (non-null) must be set."
-    }
-    precondition {
-      condition     = var.image_digest == null || !var.use_latest_tag
-      error_message = "`image_digest` may only be set alongside `image_tag` (digest pinning requires an explicit tag, not `latest`)."
-    }
     postcondition {
-      condition     = var.image_digest == null || self.sha256_digest == var.image_digest
-      error_message = "Provided `image_digest` does not match the upstream tag's actual digest. Either update the digest pin or remove it to accept the upstream content."
+      condition     = local.docker_pinned_digest == null || self.sha256_digest == local.docker_pinned_digest
+      error_message = "Provided digest in `docker_image_tag` does not match the upstream tag's actual digest. Either update the digest pin or remove it to accept the upstream content."
     }
   }
 }
@@ -126,17 +120,17 @@ resource "terraform_data" "push_lambda_image" {
 
       # Tag for ECR repository
       docker tag p0security/${local.image_name}@${data.docker_registry_image.upstream.sha256_digest} \
-        ${aws_ecr_repository.lambda.repository_url}:${local.effective_tag}
+        ${aws_ecr_repository.lambda.repository_url}:${local.docker_tag_name}
 
       # Push to ECR
-      docker push ${aws_ecr_repository.lambda.repository_url}:${local.effective_tag}
+      docker push ${aws_ecr_repository.lambda.repository_url}:${local.docker_tag_name}
     EOT
   }
 
   triggers_replace = {
     repository_url = aws_ecr_repository.lambda.repository_url
     digest         = data.docker_registry_image.upstream.sha256_digest
-    tag            = local.effective_tag
+    tag            = local.docker_tag_name
   }
 }
 
@@ -144,7 +138,7 @@ resource "terraform_data" "push_lambda_image" {
 # so its digest can differ from the upstream Docker Hub digest. Lambda needs ECR's.
 data "aws_ecr_image" "lambda" {
   repository_name = aws_ecr_repository.lambda.name
-  image_tag       = local.effective_tag
+  image_tag       = local.docker_tag_name
 
   depends_on = [terraform_data.push_lambda_image]
 }

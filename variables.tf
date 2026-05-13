@@ -49,32 +49,20 @@ variable "service" {
   type        = string
 }
 
-variable "use_latest_tag" {
-  description = "If true, deploy the `latest` tag of P0's published image from Docker Hub and auto-update on every apply. Mutually exclusive with `image_tag`."
-  type        = bool
-  default     = false
-}
+variable "docker_image_tag" {
+  description = <<-EOT
+    Tag of P0's published image on Docker Hub to deploy. To track the rolling latest release, set this to `latest`.
 
-variable "image_tag" {
-  description = "Pinned tag of P0's published image on Docker Hub. Mutually exclusive with `use_latest_tag`."
+    Accepted formats:
+      - `<tag>` — deploys whatever the upstream Docker Hub registry currently resolves the tag to.
+        Examples: `latest`, `v1.2.3`.
+      - `<tag>@sha256:<digest>` — pins the deployment to a specific image content digest. Terraform refuses to deploy if Docker Hub's tag no longer resolves to the given digest.
+        Example: `v1.2.3@sha256:abc1234...` (64 hex chars after `sha256:`).
+  EOT
   type        = string
-  nullable    = true
-  default     = null
 
   validation {
-    condition     = var.image_tag == null || length(var.image_tag) > 0
-    error_message = "image_tag must not be an empty string."
-  }
-}
-
-variable "image_digest" {
-  description = "Optional digest pin (e.g. \"sha256:abc...\") for P0's published image. When set, Terraform refuses to deploy if Docker Hub's actual digest for the tag differs. Only valid alongside `image_tag`."
-  type        = string
-  nullable    = true
-  default     = null
-
-  validation {
-    condition     = var.image_digest == null || can(regex("^sha256:[a-f0-9]{64}$", var.image_digest))
-    error_message = "image_digest must be in the form sha256:<64 hex chars>."
+    condition     = can(regex("^[^@]+(@sha256:[a-f0-9]{64})?$", var.docker_image_tag))
+    error_message = "docker_image_tag must be `<tag>` or `<tag>@sha256:<64 hex chars>` (e.g. \"latest\" or \"v1.2.3@sha256:abc...\")."
   }
 }
