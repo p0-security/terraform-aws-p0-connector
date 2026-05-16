@@ -47,22 +47,9 @@ variable "service_subnet_ids" {
 variable "service" {
   description = "Identifier (within P0) of this service"
   type        = string
-}
-
-variable "docker_image_tag" {
-  description = <<-EOT
-    Tag of P0's published image on Docker Hub to deploy. To track the rolling latest release, set this to `latest`.
-
-    Accepted formats:
-      - `<tag>` — deploys whatever the upstream Docker Hub registry currently resolves the tag to.
-        Examples: `latest`, `v1.2.3`.
-      - `<tag>@sha256:<digest>` — pins the deployment to a specific image content digest. Terraform refuses to deploy if Docker Hub's tag no longer resolves to the given digest.
-        Example: `v1.2.3@sha256:abc1234...` (64 hex chars after `sha256:`).
-  EOT
-  type        = string
 
   validation {
-    condition     = can(regex("^[^@]+(@sha256:[a-f0-9]{64})?$", var.docker_image_tag))
-    error_message = "docker_image_tag must be `<tag>` or `<tag>@sha256:<64 hex chars>` (e.g. \"latest\" or \"v1.2.3@sha256:abc...\")."
+    condition     = contains(["mysql", "pg"], var.service)
+    error_message = "service must be one of: \"mysql\", \"pg\"."
   }
 }

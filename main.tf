@@ -15,11 +15,15 @@ data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
 locals {
-  account_id           = coalesce(var.aws_account_id, data.aws_caller_identity.current.account_id)
-  image_name           = "p0-connector-${var.service}"
-  region               = coalesce(var.aws_region, data.aws_region.current.id)
-  resource_name        = "p0-connector-${var.service}-${var.vpc_id}"
-  docker_image_parts   = split("@", var.docker_image_tag)
+  account_id    = coalesce(var.aws_account_id, data.aws_caller_identity.current.account_id)
+  image_name    = "p0-connector-${var.service}"
+  region        = coalesce(var.aws_region, data.aws_region.current.id)
+  resource_name = "p0-connector-${var.service}-${var.vpc_id}"
+  service_image_tags = {
+    mysql = "sha-e4b38a5@sha256:b9a77a056e13bf859c280b8c471df27197be666e080cb48f23fa9e1d1f2c81e3"
+    pg    = "sha-e4b38a5@sha256:ee6df6f2ee9672ee2a12afdc700699e46b35d1ee2200768a1aa321d4f2926e6c"
+  }
+  docker_image_parts   = split("@", local.service_image_tags[var.service])
   docker_tag_name      = local.docker_image_parts[0]
   docker_pinned_digest = length(local.docker_image_parts) > 1 ? local.docker_image_parts[1] : null
   tags = {
