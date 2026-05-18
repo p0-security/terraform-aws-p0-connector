@@ -25,7 +25,7 @@ locals {
   }
   docker_image_parts   = split("@", local.service_image_tags[var.service])
   docker_tag_name      = local.docker_image_parts[0]
-  docker_pinned_digest = length(local.docker_image_parts) > 1 ? local.docker_image_parts[1] : null
+  docker_pinned_digest = local.docker_image_parts[1]
   tags = {
     ManagedBy  = "Terraform"
     ManagedFor = "P0"
@@ -40,7 +40,7 @@ data "docker_registry_image" "upstream" {
   lifecycle {
     postcondition {
       condition     = local.docker_pinned_digest == null || self.sha256_digest == local.docker_pinned_digest
-      error_message = "Provided digest in `docker_image_tag` does not match the upstream tag's actual digest. Either update the digest pin or remove it to accept the upstream content."
+      error_message = "Provided digest in `docker_image_tag` does not match the upstream tag's actual digest. Please check if a newer version of this terraform module is available, or contact support@p0.dev for assistance."
     }
   }
 }
