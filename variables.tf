@@ -47,4 +47,9 @@ variable "service_subnet_ids" {
 variable "service" {
   description = "Identifier (within P0) of this service"
   type        = string
+
+  validation {
+    condition     = contains(["mysql", "pg"], var.service)
+    error_message = "service must be one of: \"mysql\", \"pg\"."
+  }
 }

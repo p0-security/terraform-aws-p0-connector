@@ -4,6 +4,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    docker = {
+      source  = "kreuzwerker/docker"
+      version = "~> 3.0"
+    }
   }
 }
 
@@ -15,11 +19,29 @@ locals {
   image_name    = "p0-connector-${var.service}"
   region        = coalesce(var.aws_region, data.aws_region.current.id)
   resource_name = "p0-connector-${var.service}-${var.vpc_id}"
+  service_image_tags = {
+    mysql = "sha-e4b38a5@sha256:b9a77a056e13bf859c280b8c471df27197be666e080cb48f23fa9e1d1f2c81e3"
+    pg    = "sha-e4b38a5@sha256:ee6df6f2ee9672ee2a12afdc700699e46b35d1ee2200768a1aa321d4f2926e6c"
+  }
+  docker_image_parts   = split("@", local.service_image_tags[var.service])
+  docker_tag_name      = local.docker_image_parts[0]
+  docker_pinned_digest = local.docker_image_parts[1]
   tags = {
     ManagedBy  = "Terraform"
     ManagedFor = "P0"
     P0Service  = var.service
     VpcId      = var.vpc_id
+  }
+}
+
+data "docker_registry_image" "upstream" {
+  name = "p0security/${local.image_name}:${local.docker_tag_name}"
+
+  lifecycle {
+    postcondition {
+      condition     = local.docker_pinned_digest == null || self.sha256_digest == local.docker_pinned_digest
+      error_message = "Provided digest in `docker_image_tag` does not match the upstream tag's actual digest. Please check if a newer version of this terraform module is available, or contact support@p0.dev for assistance."
+    }
   }
 }
 
@@ -97,21 +119,32 @@ resource "terraform_data" "push_lambda_image" {
       aws ecr get-login-password --region ${local.region} | \
         docker login --username AWS --password-stdin ${local.account_id}.dkr.ecr.${local.region}.amazonaws.com
 
-      # Pull P0's public image
-      docker pull p0security/${local.image_name}:latest --platform linux/amd64
+      # Pull P0's public image by digest for determinism
+      docker pull p0security/${local.image_name}@${data.docker_registry_image.upstream.sha256_digest} --platform linux/amd64
 
       # Tag for ECR repository
-      docker tag p0security/${local.image_name}:latest \
-        ${aws_ecr_repository.lambda.repository_url}:latest
+      docker tag p0security/${local.image_name}@${data.docker_registry_image.upstream.sha256_digest} \
+        ${aws_ecr_repository.lambda.repository_url}:${local.docker_tag_name}
 
       # Push to ECR
-      docker push ${aws_ecr_repository.lambda.repository_url}:latest
+      docker push ${aws_ecr_repository.lambda.repository_url}:${local.docker_tag_name}
     EOT
   }
 
   triggers_replace = {
     repository_url = aws_ecr_repository.lambda.repository_url
+    digest         = data.docker_registry_image.upstream.sha256_digest
+    tag            = local.docker_tag_name
   }
+}
+
+# Resolve the digest as stored in ECR after push. ECR may re-encode the manifest,
+# so its digest can differ from the upstream Docker Hub digest. Lambda needs ECR's.
+data "aws_ecr_image" "lambda" {
+  repository_name = aws_ecr_repository.lambda.name
+  image_tag       = local.docker_tag_name
+
+  depends_on = [terraform_data.push_lambda_image]
 }
 
 # Lambda function (container image)
@@ -119,7 +152,7 @@ resource "aws_lambda_function" "p0_connector" {
   function_name = reverse(split(":", var.connector_arn))[0]
   role          = aws_iam_role.lambda_execution.arn
   package_type  = "Image"
-  image_uri     = "${aws_ecr_repository.lambda.repository_url}:latest"
+  image_uri     = "${aws_ecr_repository.lambda.repository_url}@${data.aws_ecr_image.lambda.image_digest}"
   timeout       = 30
   architectures = ["x86_64"]
   publish       = true
@@ -132,10 +165,6 @@ resource "aws_lambda_function" "p0_connector" {
   environment {
     variables = var.connector_env
   }
-
-  depends_on = [
-    terraform_data.push_lambda_image
-  ]
 
   tags = local.tags
 }
@@ -151,7 +180,11 @@ resource "aws_lambda_alias" "latest" {
 resource "aws_lambda_provisioned_concurrency_config" "connector" {
   function_name                     = aws_lambda_function.p0_connector.function_name
   provisioned_concurrent_executions = 1
-  qualifier                         = aws_lambda_alias.latest.name
+  qualifier                         = aws_lambda_function.p0_connector.version
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # Lambda Execution Role
