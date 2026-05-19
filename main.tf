@@ -14,6 +14,41 @@ terraform {
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
+data "aws_network_interfaces" "vpc_endpoint_enis" {
+  count = !var.setup_vpc_endpoints ? 1 : 0
+
+  filter {
+    name   = "vpc-id"
+    values = [var.vpc_id]
+  }
+  filter {
+    name   = "interface-type"
+    values = ["vpc_endpoint"]
+  }
+
+  lifecycle {
+    postcondition {
+      condition     = length(self.ids) > 0
+      error_message = "setup_vpc_endpoints is false but VPC '${var.vpc_id}' has no VPC endpoint network interfaces. Create endpoints for: ${join(", ", var.aws_services)}, or set setup_vpc_endpoints = true."
+    }
+  }
+}
+
+data "aws_vpc_endpoint" "existing" {
+  for_each = !var.setup_vpc_endpoints ? toset(var.aws_services) : toset([])
+
+  filter {
+    name   = "vpc-id"
+    values = [var.vpc_id]
+  }
+  filter {
+    name   = "service-name"
+    values = ["com.amazonaws.${local.region}.${each.key}"]
+  }
+
+  depends_on = [data.aws_network_interfaces.vpc_endpoint_enis]
+}
+
 locals {
   account_id    = coalesce(var.aws_account_id, data.aws_caller_identity.current.account_id)
   image_name    = "p0-connector-${var.service}"
@@ -52,10 +87,22 @@ resource "aws_security_group" "lambda" {
   vpc_id      = var.vpc_id
 
   tags = local.tags
+
+  lifecycle {
+    precondition {
+      condition     = var.setup_vpc_endpoints || length(data.aws_vpc_endpoint.existing) == length(toset(var.aws_services))
+      error_message = "setup_vpc_endpoints is false but one or more services have no existing VPC endpoint in VPC '${var.vpc_id}'. Create the missing endpoints or set setup_vpc_endpoints = true."
+    }
+    precondition {
+      condition     = !var.setup_vpc_endpoints || length(var.aws_services) > 0
+      error_message = "setup_vpc_endpoints is true but aws_services is empty. The Lambda would have an egress rule pointing to a VPC endpoint security group with no endpoints attached, silently breaking all AWS API calls."
+    }
+  }
 }
 
 # Security group for VPC endpoints
 resource "aws_security_group" "vpc_endpoint" {
+  count       = var.setup_vpc_endpoints ? 1 : 0
   name        = "p0-connector-vpc-endpoints-${var.service}-${var.vpc_id}"
   description = "Security group for VPC endpoints allowing traffic from Lambda"
   vpc_id      = var.vpc_id
@@ -65,33 +112,35 @@ resource "aws_security_group" "vpc_endpoint" {
 
 # Security group rules (separate to avoid cycles)
 resource "aws_security_group_rule" "lambda_to_vpc_endpoint" {
+  count                    = var.setup_vpc_endpoints ? 1 : 0
   type                     = "egress"
   description              = "HTTPS outbound to VPC endpoints"
   from_port                = 443
   to_port                  = 443
   protocol                 = "tcp"
   security_group_id        = aws_security_group.lambda.id
-  source_security_group_id = aws_security_group.vpc_endpoint.id
+  source_security_group_id = aws_security_group.vpc_endpoint[0].id
 }
 
 resource "aws_security_group_rule" "vpc_endpoint_from_lambda" {
+  count                    = var.setup_vpc_endpoints ? 1 : 0
   type                     = "ingress"
   description              = "HTTPS traffic from Lambda"
   from_port                = 443
   to_port                  = 443
   protocol                 = "tcp"
-  security_group_id        = aws_security_group.vpc_endpoint.id
+  security_group_id        = aws_security_group.vpc_endpoint[0].id
   source_security_group_id = aws_security_group.lambda.id
 }
 
 # VPC endpoints for AWS services
 resource "aws_vpc_endpoint" "aws_services" {
-  for_each            = toset(var.aws_services)
+  for_each            = var.setup_vpc_endpoints ? toset(var.aws_services) : toset([])
   vpc_id              = var.vpc_id
   service_name        = "com.amazonaws.${local.region}.${each.key}"
   vpc_endpoint_type   = "Interface"
   subnet_ids          = var.service_subnet_ids
-  security_group_ids  = [aws_security_group.vpc_endpoint.id]
+  security_group_ids  = [aws_security_group.vpc_endpoint[0].id]
   private_dns_enabled = true
 
   tags = local.tags
