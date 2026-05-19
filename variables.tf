@@ -23,8 +23,19 @@ variable "aws_role_name" {
 }
 
 variable "aws_services" {
-  description = "IDs of AWS service APIs that the P0 connector needs to reach"
+  description = "IDs of AWS service APIs that the P0 connector needs to reach. Used to create VPC interface endpoints when setup_vpc_endpoints is true."
   type        = list(string)
+
+  validation {
+    condition     = !var.setup_vpc_endpoints || length(var.aws_services) > 0
+    error_message = "setup_vpc_endpoints is true but aws_services is empty. The Lambda would have an egress rule pointing to a VPC endpoint security group with no endpoints attached, silently breaking all AWS API calls."
+  }
+}
+
+variable "setup_vpc_endpoints" {
+  description = "Whether to create VPC interface endpoints for the services listed in aws_services. Set to false if the endpoints already exist in your VPC."
+  type        = bool
+  default     = false
 }
 
 variable "connector_arn" {
