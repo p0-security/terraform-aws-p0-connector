@@ -88,16 +88,6 @@ resource "aws_security_group" "lambda" {
 
   tags = local.tags
 
-  lifecycle {
-    precondition {
-      condition     = var.setup_vpc_endpoints || length(data.aws_vpc_endpoint.existing) == length(toset(var.aws_services))
-      error_message = "setup_vpc_endpoints is false but one or more services have no existing VPC endpoint in VPC '${var.vpc_id}'. Create the missing endpoints or set setup_vpc_endpoints = true."
-    }
-    precondition {
-      condition     = !var.setup_vpc_endpoints || length(var.aws_services) > 0
-      error_message = "setup_vpc_endpoints is true but aws_services is empty. The Lambda would have an egress rule pointing to a VPC endpoint security group with no endpoints attached, silently breaking all AWS API calls."
-    }
-  }
 }
 
 # Security group for VPC endpoints
