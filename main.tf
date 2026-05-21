@@ -213,6 +213,10 @@ resource "aws_lambda_alias" "latest" {
   name             = "latest"
   function_name    = aws_lambda_function.p0_connector.function_name
   function_version = aws_lambda_function.p0_connector.version
+  lifecycle {
+    ignore_changes       = [function_version]
+    replace_triggered_by = [aws_lambda_function.p0_connector.image_uri]
+  }
 }
 
 # Provisioned concurrency for Lambda
@@ -223,6 +227,8 @@ resource "aws_lambda_provisioned_concurrency_config" "connector" {
 
   lifecycle {
     create_before_destroy = true
+    ignore_changes        = [qualifier]
+    replace_triggered_by  = [aws_lambda_function.p0_connector.image_uri]
   }
 }
 
