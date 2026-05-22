@@ -2,7 +2,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.0"
     }
     docker = {
       source  = "kreuzwerker/docker"
@@ -12,10 +12,10 @@ terraform {
 }
 
 data "aws_caller_identity" "current" {}
-data "aws_region" "current" {}
 
 data "aws_network_interfaces" "vpc_endpoint_enis" {
-  count = !var.setup_vpc_endpoints ? 1 : 0
+  count  = !var.setup_vpc_endpoints ? 1 : 0
+  region = var.aws_region
 
   filter {
     name   = "vpc-id"
@@ -36,6 +36,7 @@ data "aws_network_interfaces" "vpc_endpoint_enis" {
 
 data "aws_vpc_endpoint" "existing" {
   for_each = !var.setup_vpc_endpoints ? toset(var.aws_services) : toset([])
+  region   = var.aws_region
 
   filter {
     name   = "vpc-id"
@@ -43,7 +44,7 @@ data "aws_vpc_endpoint" "existing" {
   }
   filter {
     name   = "service-name"
-    values = ["com.amazonaws.${local.region}.${each.key}"]
+    values = ["com.amazonaws.${var.aws_region}.${each.key}"]
   }
 
   depends_on = [data.aws_network_interfaces.vpc_endpoint_enis]
@@ -52,7 +53,6 @@ data "aws_vpc_endpoint" "existing" {
 locals {
   account_id    = coalesce(var.aws_account_id, data.aws_caller_identity.current.account_id)
   image_name    = "p0-connector-${var.service}"
-  region        = coalesce(var.aws_region, data.aws_region.current.id)
   resource_name = "p0-connector-${var.service}-${var.vpc_id}"
   service_image_tags = {
     mysql = "sha-0e7108e@sha256:33b1c2bae4a5e2a121eee0256fd7159eb916a4fbdedb4a4c91c8522e0eb3e375"
@@ -82,6 +82,7 @@ data "docker_registry_image" "upstream" {
 
 # Security group for Lambda
 resource "aws_security_group" "lambda" {
+  region      = var.aws_region
   name        = local.resource_name
   description = "Security group for P0 connector Lambda function"
   vpc_id      = var.vpc_id
@@ -93,6 +94,7 @@ resource "aws_security_group" "lambda" {
 # Security group for VPC endpoints
 resource "aws_security_group" "vpc_endpoint" {
   count       = var.setup_vpc_endpoints ? 1 : 0
+  region      = var.aws_region
   name        = "p0-connector-vpc-endpoints-${var.service}-${var.vpc_id}"
   description = "Security group for VPC endpoints allowing traffic from Lambda"
   vpc_id      = var.vpc_id
@@ -103,6 +105,7 @@ resource "aws_security_group" "vpc_endpoint" {
 # Security group rules (separate to avoid cycles)
 resource "aws_security_group_rule" "lambda_to_vpc_endpoint" {
   count                    = var.setup_vpc_endpoints ? 1 : 0
+  region                   = var.aws_region
   type                     = "egress"
   description              = "HTTPS outbound to VPC endpoints"
   from_port                = 443
@@ -114,6 +117,7 @@ resource "aws_security_group_rule" "lambda_to_vpc_endpoint" {
 
 resource "aws_security_group_rule" "vpc_endpoint_from_lambda" {
   count                    = var.setup_vpc_endpoints ? 1 : 0
+  region                   = var.aws_region
   type                     = "ingress"
   description              = "HTTPS traffic from Lambda"
   from_port                = 443
@@ -126,8 +130,9 @@ resource "aws_security_group_rule" "vpc_endpoint_from_lambda" {
 # VPC endpoints for AWS services
 resource "aws_vpc_endpoint" "aws_services" {
   for_each            = var.setup_vpc_endpoints ? toset(var.aws_services) : toset([])
+  region              = var.aws_region
   vpc_id              = var.vpc_id
-  service_name        = "com.amazonaws.${local.region}.${each.key}"
+  service_name        = "com.amazonaws.${var.aws_region}.${each.key}"
   vpc_endpoint_type   = "Interface"
   subnet_ids          = var.service_subnet_ids
   security_group_ids  = [aws_security_group.vpc_endpoint[0].id]
@@ -138,6 +143,7 @@ resource "aws_vpc_endpoint" "aws_services" {
 
 # ECR repository for Lambda container image
 resource "aws_ecr_repository" "lambda" {
+  region               = var.aws_region
   name                 = local.resource_name
   image_tag_mutability = "MUTABLE"
 
@@ -155,8 +161,8 @@ resource "terraform_data" "push_lambda_image" {
   provisioner "local-exec" {
     command = <<-EOT
       # Login to ECR
-      aws ecr get-login-password --region ${local.region} | \
-        docker login --username AWS --password-stdin ${local.account_id}.dkr.ecr.${local.region}.amazonaws.com
+      aws ecr get-login-password --region ${var.aws_region} | \
+        docker login --username AWS --password-stdin ${local.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com
 
       # Pull P0's public image by digest for determinism
       docker pull p0security/${local.image_name}@${data.docker_registry_image.upstream.sha256_digest} --platform linux/amd64
@@ -180,6 +186,7 @@ resource "terraform_data" "push_lambda_image" {
 # Resolve the digest as stored in ECR after push. ECR may re-encode the manifest,
 # so its digest can differ from the upstream Docker Hub digest. Lambda needs ECR's.
 data "aws_ecr_image" "lambda" {
+  region          = var.aws_region
   repository_name = aws_ecr_repository.lambda.name
   image_tag       = local.docker_tag_name
 
@@ -188,6 +195,7 @@ data "aws_ecr_image" "lambda" {
 
 # Lambda function (container image)
 resource "aws_lambda_function" "p0_connector" {
+  region        = var.aws_region
   function_name = reverse(split(":", var.connector_arn))[0]
   role          = aws_iam_role.lambda_execution.arn
   package_type  = "Image"
@@ -210,6 +218,7 @@ resource "aws_lambda_function" "p0_connector" {
 
 # Lambda alias for version management
 resource "aws_lambda_alias" "latest" {
+  region           = var.aws_region
   name             = "latest"
   function_name    = aws_lambda_function.p0_connector.function_name
   function_version = aws_lambda_function.p0_connector.version
@@ -221,6 +230,7 @@ resource "aws_lambda_alias" "latest" {
 
 # Provisioned concurrency for Lambda
 resource "aws_lambda_provisioned_concurrency_config" "connector" {
+  region                            = var.aws_region
   function_name                     = aws_lambda_function.p0_connector.function_name
   provisioned_concurrent_executions = 1
   qualifier                         = aws_lambda_function.p0_connector.version
