@@ -54,7 +54,7 @@ data "aws_vpc_endpoint" "existing" {
 locals {
   account_id    = coalesce(var.aws_account_id, data.aws_caller_identity.current.account_id)
   image_name    = "p0-connector-${var.service}"
-  region        = coalesce(var.aws_region, data.aws_region.current.region)
+  region        = coalesce(var.aws_region, data.aws_region.current.id)
   resource_name = "p0-connector-${var.service}-${var.vpc_id}"
   service_image_tags = {
     mysql = "sha-0e7108e@sha256:33b1c2bae4a5e2a121eee0256fd7159eb916a4fbdedb4a4c91c8522e0eb3e375"
