@@ -12,6 +12,8 @@ variable "aws_account_id" {
 
 variable "aws_region" {
   description = "The AWS region"
+  nullable    = true
+  default     = null
   type        = string
 }
 
