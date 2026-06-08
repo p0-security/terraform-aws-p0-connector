@@ -55,8 +55,8 @@ locals {
   region        = coalesce(var.aws_region, data.aws_region.current.id)
   resource_name = "p0-connector-${var.service}-${var.vpc_id}"
   service_image_tags = {
-    mysql = "sha-0e7108e@sha256:33b1c2bae4a5e2a121eee0256fd7159eb916a4fbdedb4a4c91c8522e0eb3e375"
-    pg    = "sha-0e7108e@sha256:2f55329258f2695456798255cb1959b465ded0d0cfa69384d6243e1ccf9cf118"
+    mysql = "sha-84796b1@sha256:f3ea0065709083fa45b501795b7b825b586479667eaad0c2b3a018f42f547547"
+    pg    = "sha-84796b1@sha256:639d1e99840e2828e08bf552764736a482fa9b8463167ede3f6f9e0fb1f35701"
   }
   docker_image_parts   = split("@", local.service_image_tags[var.service])
   docker_tag_name      = local.docker_image_parts[0]
