@@ -56,7 +56,7 @@ locals {
   resource_name = "p0-connector-${var.service}-${var.vpc_id}"
   service_image_tags = {
     mysql = "sha-49c310f@sha256:3e2372a55ea8a1abc4e53c5e4d4311b4121baff92c23fced61a325f669454c47"
-    pg    = "sha-49c310f@sha256:222cc9a2e3a80f73c22a2ec030022f0d6447451b5458a2abf6ac0f114f13a210"
+    pg    = "sha-6809419@sha256:cd1c6b0ccff522a75742167abe16b48673b147d79fa8fed37a5cf95dd0af702d"
   }
   docker_image_parts   = split("@", local.service_image_tags[var.service])
   docker_tag_name      = local.docker_image_parts[0]
