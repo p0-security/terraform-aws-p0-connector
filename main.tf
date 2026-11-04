@@ -201,8 +201,13 @@ resource "aws_lambda_function" "p0_connector" {
     security_group_ids = [aws_security_group.lambda.id]
   }
 
-  environment {
-    variables = var.connector_env
+  # AWS stores no environment for a function without variables, so an empty
+  # block would differ from state and make every plan show a Lambda update.
+  dynamic "environment" {
+    for_each = length(var.connector_env) > 0 ? [1] : []
+    content {
+      variables = var.connector_env
+    }
   }
 
   tags = local.tags
