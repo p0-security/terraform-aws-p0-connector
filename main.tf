@@ -12,7 +12,6 @@ terraform {
 }
 
 data "aws_caller_identity" "current" {}
-data "aws_region" "current" {}
 
 data "aws_network_interfaces" "vpc_endpoint_enis" {
   count = !var.setup_vpc_endpoints ? 1 : 0
@@ -49,10 +48,13 @@ data "aws_vpc_endpoint" "existing" {
   depends_on = [data.aws_network_interfaces.vpc_endpoint_enis]
 }
 
+# The region comes from the connector ARN, which is the Lambda's ARN, rather than
+# data.aws_region: its name and id are deprecated in aws 6.x, and their
+# replacement, region, does not exist in aws 5.x.
 locals {
   account_id    = coalesce(var.aws_account_id, data.aws_caller_identity.current.account_id)
   image_name    = "p0-connector-${var.service}"
-  region        = coalesce(var.aws_region, data.aws_region.current.id)
+  region        = coalesce(var.aws_region, split(":", var.connector_arn)[3])
   resource_name = "p0-connector-${var.service}-${var.vpc_id}"
   service_image_tags = {
     mysql = "sha-49c310f@sha256:3e2372a55ea8a1abc4e53c5e4d4311b4121baff92c23fced61a325f669454c47"
